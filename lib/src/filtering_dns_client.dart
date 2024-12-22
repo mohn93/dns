@@ -14,7 +14,7 @@
 
 import 'dart:async';
 
-import 'package:ip/ip.dart';
+import 'package:better_dart_ip/ip.dart';
 import 'package:universal_io/io.dart';
 
 import 'dns_client.dart';
@@ -24,22 +24,27 @@ typedef Callback<T> = void Function(T argument);
 
 /// A DNS client that can log or modify questions and answers.
 class FilteringDnsClient extends DelegatingDnsClient {
-  final Callback<DnsPacket> beforeOperation;
-  final Callback<DnsPacket> afterOperation;
+  final Callback<DnsPacket>? beforeOperation;
+  final Callback<DnsPacket>? afterOperation;
 
   FilteringDnsClient(DnsClient client,
       {this.beforeOperation, this.afterOperation})
       : super(client);
 
   @override
-  Future<List<IpAddress>> lookup(String host,
-      {InternetAddressType type = InternetAddressType.any}) async {
+  Future<List<IpAddress>> lookup(
+      String host, {
+        InternetAddressType type = InternetAddressType.any,
+        DnsRecordType recordType = DnsRecordType.a,
+      }) async {
     if (beforeOperation != null) {
       final packet = DnsPacket();
-      packet.questions.add(DnsQuestion(host: host));
-      beforeOperation(packet);
+      packet.questions.add(DnsQuestion(host: host, recordType: recordType));
+      beforeOperation?.call(packet);
     }
-    final result = await super.lookup(host);
+
+    final result = await super.lookup(host, type: type, recordType: recordType);
+
     if (afterOperation != null) {
       final packet = DnsPacket();
       for (var ip in result) {
@@ -53,35 +58,45 @@ class FilteringDnsClient extends DelegatingDnsClient {
         answer.data = ip.toImmutableBytes();
         packet.answers.add(answer);
       }
-      afterOperation(packet);
+      afterOperation?.call(packet);
     }
+
     return result;
   }
 
   @override
-  Future<DnsPacket> handlePacket(DnsPacket packet, {Duration timeout}) async {
-    if (beforeOperation != null) {
-      beforeOperation(packet);
-    }
-    final result = await super.handlePacket(packet, timeout: timeout);
-    if (result != null && afterOperation != null) {
-      afterOperation(result);
-    }
-    return result;
-  }
-
-  @override
-  Future<DnsPacket> lookupPacket(String host,
-      {InternetAddressType type = InternetAddressType.any}) async {
+  Future<DnsPacket> lookupPacket(
+      String host, {
+        InternetAddressType type = InternetAddressType.any,
+        DnsRecordType recordType = DnsRecordType.a,
+      }) async {
     if (beforeOperation != null) {
       final packet = DnsPacket();
-      packet.questions.add(DnsQuestion(host: host));
-      beforeOperation(packet);
+      packet.questions.add(DnsQuestion(host: host, recordType: recordType));
+      beforeOperation?.call(packet);
     }
-    final result = await super.lookupPacket(host, type: type);
+
+    final result = await super.lookupPacket(host, type: type, recordType: recordType);
+
     if (afterOperation != null) {
-      afterOperation(result);
+      afterOperation?.call(result);
     }
+
+    return result;
+  }
+
+  @override
+  Future<DnsPacket?> handlePacket(DnsPacket packet, {Duration? timeout}) async {
+    if (beforeOperation != null) {
+      beforeOperation?.call(packet);
+    }
+
+    final result = await super.handlePacket(packet, timeout: timeout);
+
+    if (result != null && afterOperation != null) {
+      afterOperation?.call(result);
+    }
+
     return result;
   }
 }

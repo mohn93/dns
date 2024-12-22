@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:ip/foundation.dart';
-import 'package:raw/raw.dart';
-import 'package:meta/meta.dart';
+import 'dart:convert';
 
-const Protocol dns = Protocol("DNS");
+import 'package:better_dart_ip/foundation.dart';
+import 'package:better_dart_ip/ip.dart';
+import 'package:dart_raw/raw.dart';
+
+const Protocol dns = Protocol('DNS');
 
 void _writeDnsName(RawWriter writer, List<String> parts, int startIndex,
-    Map<String, int> offsets) {
+    Map<String, int>? offsets) {
   // Store pointer in the map
   if (offsets != null) {
-    final key = parts.join(".");
+    final key = parts.join('.');
     final existingPointer = offsets[key];
     if (existingPointer != null) {
       writer.writeUint16(0xC000 | existingPointer);
@@ -36,7 +38,7 @@ void _writeDnsName(RawWriter writer, List<String> parts, int startIndex,
 
     // Find pointer
     if (i >= 1 && offsets != null) {
-      final offset = offsets[parts.skip(i).join(".")];
+      final offset = offsets[parts.skip(i).join('.')];
       if (offset != null) {
         // Write pointer
         writer.writeUint16(0xc000 | offset);
@@ -53,7 +55,7 @@ void _writeDnsName(RawWriter writer, List<String> parts, int startIndex,
   writer.writeUint8(0);
 }
 
-List<String> _readDnsName(RawReader reader, int startIndex) {
+List<String> _readDnsName(RawReader reader, int? startIndex) {
   var name = <String>[];
   while (reader.availableLengthInBytes > 0) {
     // Read length
@@ -72,7 +74,7 @@ List<String> _readDnsName(RawReader reader, int startIndex) {
       // Validate we received start index,
       // so we can actually handle pointers
       if (startIndex == null) {
-        throw ArgumentError.notNull("startIndex");
+        throw ArgumentError.notNull('startIndex');
       }
 
       // Calculate and validate index in the data
@@ -82,7 +84,7 @@ List<String> _readDnsName(RawReader reader, int startIndex) {
           reader.bufferAsByteData.getUint8(pointedIndex) >= 64) {
         final index = reader.index - 2;
         throw StateError(
-          "invalid pointer from index 0x${index.toRadixString(16)} (decimal: $index) to index 0x${pointedIndex.toRadixString(16)} ($pointedIndex)",
+          'invalid pointer from index 0x${index.toRadixString(16)} (decimal: $index) to index 0x${pointedIndex.toRadixString(16)} ($pointedIndex)',
         );
       }
 
@@ -116,21 +118,21 @@ class DnsResourceRecord extends SelfCodec {
   static String stringFromResponseCode(int code) {
     switch (code) {
       case responseCodeNoError:
-        return "No error";
+        return 'No error';
       case responseCodeFormatError:
-        return "Format error";
+        return 'Format error';
       case responseCodeServerFailure:
-        return "Server failure";
+        return 'Server failure';
       case responseCodeNonExistentDomain:
-        return "Non-existent domain";
+        return 'Non-existent domain';
       case responseCodeNotImplemented:
-        return "Not implemented";
+        return 'Not implemented';
       case responseCodeQueryRefused:
-        return "Query refused";
+        return 'Query refused';
       case responseCodeNotInZone:
-        return "Not in the zone";
+        return 'Not in the zone';
       default:
-        return "Unknown";
+        return 'Unknown';
     }
   }
 
@@ -150,15 +152,15 @@ class DnsResourceRecord extends SelfCodec {
   static const int typeMailServer = 15;
 
   /// Text record ("TXT" record).
-  static const int typeText = 15;
+  static const int typeText = 16;
 
-  /// IPv6 host address record.
+  /// IPv6 host address record (AAAA).
   static const int typeIp6 = 28;
 
   /// Server discovery ("SRV" record).
   static const int typeServerDiscovery = 33;
 
-  static String stringFromType(int value) {
+  static String stringFromType(DnsRecordType value) {
     return DnsQuestion.stringFromType(value);
   }
 
@@ -174,15 +176,15 @@ class DnsResourceRecord extends SelfCodec {
   List<String> nameParts = const <String>[];
 
   set name(String value) {
-    this.nameParts = value.split(".");
+    nameParts = value.split('.');
   }
 
-  String get name => nameParts.join(".");
+  String get name => nameParts.join('.');
 
   /// 16-bit type
   int type = typeIp4;
 
-  /// 16-it class
+  /// 16-bit class
   int classy = classInternetAddress;
 
   /// 32-bit TTL
@@ -194,14 +196,14 @@ class DnsResourceRecord extends SelfCodec {
   DnsResourceRecord();
 
   DnsResourceRecord.withAnswer(
-      {@required String name, @required this.type, @required this.data}) {
+      {required String name, required this.type, required this.data}) {
     this.name = name;
     ttl = 600;
   }
 
   @override
   void encodeSelf(RawWriter writer,
-      {int startIndex, Map<String, int> pointers}) {
+      { int startIndex = 0 , Map<String, int>? pointers}) {
     // Write name
     // (a list of labels/pointers)
     _writeDnsName(
@@ -228,10 +230,9 @@ class DnsResourceRecord extends SelfCodec {
   }
 
   @override
-  void decodeSelf(RawReader reader, {int startIndex}) {
+  void decodeSelf(RawReader reader, {int? startIndex}) {
     startIndex ??= 0;
     // Read name
-    // (a list of labels/pointers)
     nameParts = _readDnsName(reader, startIndex);
 
     // 2-byte type
@@ -248,6 +249,59 @@ class DnsResourceRecord extends SelfCodec {
 
     // N-byte data
     data = reader.readUint8ListViewOrCopy(dataLength);
+  }
+
+  String dataAsHumanReadableString() {
+    switch (type) {
+      case typeText:
+      // TXT records are a series of length-prefixed strings.
+        final bytes = data;
+        int i = 0;
+        final parts = <String>[];
+        while (i < bytes.length) {
+          final length = bytes[i];
+          i++;
+          if (i + length > bytes.length) {
+            // Malformed TXT data, break early.
+            break;
+          }
+          final segment = bytes.sublist(i, i + length);
+          i += length;
+          // Decode the segment as UTF-8 text
+          final text = utf8.decode(segment);
+          parts.add(text);
+        }
+        return parts.join('');
+
+      case typeIp4:
+      // A record: data is 4 bytes representing IPv4 address
+        if (data.length == 4) {
+          return '${data[0]}.${data[1]}.${data[2]}.${data[3]}';
+        }
+        return 'Invalid A record data';
+
+      case typeIp6:
+      // AAAA record: data is 16 bytes representing IPv6 address
+        if (data.length == 16) {
+          final ip = IpAddress.fromBytes(data);
+          return ip.toString();
+        }
+        return 'Invalid AAAA record data';
+
+      case typeCanonicalName:
+      case typeNameServer:
+      case typeDomainNamePointer:
+      // These contain domain names in the data, which may need parsing similar to _readDnsName.
+      // If needed, implement parsing logic (currently the data might already have been read).
+      // For simplicity, assume data is raw domain name string if needed.
+      // Often, these are returned in the `nameParts` if the server returns them as answers.
+      // If you need to decode from 'data' for these, implement a name decoder similar to the question decoding.
+        return 'Domain name (CNAME/NS/PTR) not implemented';
+
+      default:
+      // For other types, just return a hex string or raw bytes for now.
+        return 'Raw data: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}';
+    }
   }
 
   @override
@@ -279,11 +333,11 @@ class DnsPacket extends Packet {
     isRecursionDesired = true;
   }
 
-  DnsPacket.withResponse({DnsPacket request}) {
+  DnsPacket.withResponse({DnsPacket? request}) {
     op = opQuery;
     isResponse = true;
     if (request != null) {
-      this.questions = <DnsQuestion>[];
+      questions = <DnsQuestion>[];
     }
   }
 
@@ -409,16 +463,10 @@ class DnsPacket extends Packet {
     // 4-byte span at index 0
     _v0 = reader.readUint32();
 
-    // 2-byte span at index 4
+    // 2-byte spans
     var questionsLength = reader.readUint16();
-
-    // 2-byte span at index 6
     var answersLength = reader.readUint16();
-
-    // 2-byte span at index 8
     var nameServerResourcesLength = reader.readUint16();
-
-    // 2-byte span at index 10
     var additionalResourcesLength = reader.readUint16();
 
     for (; questionsLength > 0; questionsLength--) {
@@ -465,34 +513,98 @@ class DnsPacket extends Packet {
   }
 }
 
-class DnsQuestion extends SelfCodec {
-  // -----
-  // Types
-  // -----
-
-  static const int typeIp4 = 1;
-  static const int typeNameServer = 2;
-  static const int typeCanonicalName = 5;
-  static const int typeMailServer = 15;
-  static const int typeTxt = 16;
-  static const int typeIp6 = 28;
-
-  static String stringFromType(int type) {
-    switch (type) {
-      case typeIp4:
-        return "IPv4";
-      case typeNameServer:
-        return "name server";
-      case typeCanonicalName:
-        return "Canonical name";
-      case typeIp6:
-        return "IPv6";
-      case typeMailServer:
-        return "MX";
-      case typeTxt:
-        return "TXT";
+enum DnsRecordType {
+  a(1),
+  ns(2),
+  cname(5),
+  mx(15),
+  txt(16),
+  aaaa(28),
+  any(255),
+  srv(33),
+  ptr(12),
+  mg(14),
+  caa(257);
+  final int value;
+  const DnsRecordType(this.value);
+  factory DnsRecordType.fromInt(int value) {
+    switch (value) {
+      case 1:
+        return DnsRecordType.a;
+      case 2:
+        return DnsRecordType.ns;
+      case 5:
+        return DnsRecordType.cname;
+      case 15:
+        return DnsRecordType.mx;
+      case 16:
+        return DnsRecordType.txt;
+      case 28:
+        return DnsRecordType.aaaa;
+      case 255:
+        return DnsRecordType.any;
+      case 33:
+        return DnsRecordType.srv;
+      case 12:
+        return DnsRecordType.ptr;
+      case 14:
+        return DnsRecordType.mg;
+      case 257:
+        return DnsRecordType.caa;
       default:
-        return "type $type";
+        throw ArgumentError.value(value, 'value', 'Invalid DNS record type');
+    }
+  }
+  String label() {
+    switch (this) {
+      case DnsRecordType.a:
+        return 'A (IPv4)';
+      case DnsRecordType.ns:
+        return 'NS';
+      case DnsRecordType.cname:
+        return 'CNAME';
+      case DnsRecordType.mx:
+        return 'MX';
+      case DnsRecordType.txt:
+        return 'TXT';
+      case DnsRecordType.aaaa:
+        return 'AAAA (IPv6)';
+      case DnsRecordType.any:
+        return 'ANY';
+      case DnsRecordType.srv:
+        return 'SRV';
+      case DnsRecordType.ptr:
+        return 'PTR';
+      case DnsRecordType.mg:
+        return 'MG';
+      case DnsRecordType.caa:
+        return 'CAA';
+
+      default:
+        return 'type $this';
+    }
+  }
+}
+class DnsQuestion extends SelfCodec {
+
+  static String stringFromType(DnsRecordType type) {
+    switch (type) {
+      case DnsRecordType.a:
+        return 'A (IPv4)';
+      case DnsRecordType.ns:
+        return 'NS';
+      case DnsRecordType.cname:
+        return 'CNAME';
+      case DnsRecordType.mx:
+        return 'MX';
+      case DnsRecordType.txt:
+        return 'TXT';
+      case DnsRecordType.aaaa:
+        return 'AAAA (IPv6)';
+      case DnsRecordType.any:
+        return 'ANY';
+      default:
+        return 'type $type';
     }
   }
 
@@ -505,9 +617,9 @@ class DnsQuestion extends SelfCodec {
   static String stringFromClass(int type) {
     switch (type) {
       case classInternetAddress:
-        return "Internet address";
+        return 'Internet address';
       default:
-        return "class $type";
+        return 'class $type';
     }
   }
 
@@ -517,26 +629,27 @@ class DnsQuestion extends SelfCodec {
   List<String> nameParts = <String>[];
 
   set name(String value) {
-    this.nameParts = value.split(".");
+    nameParts = value.split('.');
   }
 
-  String get name => nameParts.join(".");
+  String get name => nameParts.join('.');
 
   /// 16-bit type
-  int type = typeIp4;
+  DnsRecordType type = DnsRecordType.a;
 
   /// 16-bit class
   int classy = classInternetAddress;
 
-  DnsQuestion({String host}) {
+  DnsQuestion({String? host, DnsRecordType recordType = DnsRecordType.a}) {
     if (host != null) {
-      nameParts = host.split(".");
+      nameParts = host.split('.');
     }
+    type = recordType;
   }
 
   @override
   void encodeSelf(RawWriter writer,
-      {int startIndex, Map<String, int> pointers}) {
+      {int startIndex = 0, Map<String, int>? pointers}) {
     // Write name
     _writeDnsName(
       writer,
@@ -546,19 +659,19 @@ class DnsQuestion extends SelfCodec {
     );
 
     // 2-byte type
-    writer.writeUint16(type);
+    writer.writeUint16(type.value);
 
     // 2-byte class
     writer.writeUint16(classy);
   }
 
   @override
-  void decodeSelf(RawReader reader, {int startIndex}) {
+  void decodeSelf(RawReader reader, {int? startIndex}) {
     // Name
-    this.nameParts = _readDnsName(reader, startIndex);
+    nameParts = _readDnsName(reader, startIndex);
 
     // 2-byte question type
-    type = reader.readUint16();
+    type = DnsRecordType.fromInt(reader.readUint16());
 
     // 2-byte question class
     classy = reader.readUint16();

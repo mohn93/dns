@@ -14,7 +14,7 @@
 
 import 'dart:async';
 
-import 'package:raw/raw.dart';
+import 'package:dart_raw/raw.dart';
 import 'package:universal_io/io.dart';
 
 import 'dns_client.dart';
@@ -27,15 +27,14 @@ class DnsServer {
   final DnsClient client;
 
   DnsServer(this.socket, this.client)
-      : assert(socket != null),
-        assert(client != null);
+      ;
 
   void close() {
     socket.close();
   }
 
   static Future<DnsServer> bind(DnsClient client,
-      {InternetAddress address, int port = defaultPort}) async {
+      {InternetAddress? address, int port = defaultPort}) async {
     address ??= InternetAddress.loopbackIPv4;
     final socket = await RawDatagramSocket.bind(address, port);
     final server = DnsServer(socket, client);

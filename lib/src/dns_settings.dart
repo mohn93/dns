@@ -19,13 +19,13 @@ import 'package:universal_io/io.dart';
 /// Provides access to Mac OS X network settings.
 class MacNetworkSettings {
   /// Returns DNS servers.
-  Future<List<InternetAddress>> getDnsServers() async {
-    final result = await _networkSetup(["-getdnsservers", "Wi-Fi"]);
+  Future<List<InternetAddress?>> getDnsServers() async {
+    final result = await _networkSetup(['-getdnsservers', 'Wi-Fi']);
     if (result.contains("There aren't any")) {
       return [];
     }
     return result
-        .split("\n")
+        .split('\n')
         .map((line) {
           line = line.trim();
           if (line.isEmpty) {
@@ -43,9 +43,9 @@ class MacNetworkSettings {
 
   /// Sets DNS servers.
   Future setDnsServers(List<InternetAddress> addresses) async {
-    final args = ["-setdnsservers", "Wi-Fi"];
+    final args = ['-setdnsservers', 'Wi-Fi'];
     if (addresses.isEmpty) {
-      args.add("Empty");
+      args.add('Empty');
     } else {
       args.addAll(addresses.map((item) => item.address));
     }
@@ -54,9 +54,9 @@ class MacNetworkSettings {
 
   Future<String> _networkSetup(List<String> args) async {
     if (Platform.isMacOS == false) {
-      throw StateError("The current operating system is not Mac OS X");
+      throw StateError('The current operating system is not Mac OS X');
     }
-    const executable = "networksetup";
+    const executable = 'networksetup';
     final process = await Process.run(
       executable,
       args,
@@ -64,7 +64,7 @@ class MacNetworkSettings {
     );
     final stderr = process.stderr as String;
     if (stderr.isNotEmpty) {
-      throw StateError("Error: $stderr");
+      throw StateError('Error: $stderr');
     }
     return process.stdout as String;
   }

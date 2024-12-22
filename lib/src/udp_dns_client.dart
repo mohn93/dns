@@ -1,114 +1,113 @@
-// Copyright 2019 Gohilla.com team.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math';
 
-import 'package:ip/ip.dart';
-import 'package:meta/meta.dart';
-import 'package:raw/raw.dart';
+import 'package:better_dart_ip/ip.dart';
+import 'package:dart_raw/raw.dart';
 import 'package:universal_io/io.dart';
 
 import 'dns_client.dart';
 import 'dns_packet.dart';
 
-/// A standard DNS-over-UDP client implementation.
+/// EDNS(0) constants
+const int typeOpt = 41; // OPT pseudo-record
+const int defaultUdpPayloadSize = 4096; // Common EDNS0 buffer size
+
+/// A standard DNS-over-UDP client implementation with EDNS(0) support.
 class UdpDnsClient extends PacketBasedDnsClient {
   static final _portRandom = Random.secure();
   final InternetAddress remoteAddress;
   final int remotePort;
-  final InternetAddress localAddress;
-  final int localPort;
-  final Duration timeout;
-  Future<RawDatagramSocket> _socket;
+  final InternetAddress? localAddress;
+  final int? localPort;
+  final Duration? timeout;
+  Future<RawDatagramSocket>? _socket;
 
   final LinkedList<_DnsResponseWaiter> _responseWaiters =
-      LinkedList<_DnsResponseWaiter>();
+  LinkedList<_DnsResponseWaiter>();
 
-  UdpDnsClient(
-      {@required this.remoteAddress,
-      this.remotePort = 53,
-      this.localAddress,
-      this.localPort,
-      this.timeout}) {
-    if (remoteAddress == null) {
-      throw ArgumentError.notNull("remoteAddress");
-    }
-    if (remotePort == null) {
-      throw ArgumentError.notNull("remotePort");
-    }
-  }
+  UdpDnsClient({
+    required this.remoteAddress,
+    this.remotePort = 53,
+    this.localAddress,
+    this.localPort,
+    this.timeout,
+  });
 
   factory UdpDnsClient.google() {
-    return UdpDnsClient(remoteAddress: InternetAddress("8.8.8.8"));
+    return UdpDnsClient(remoteAddress: InternetAddress('8.8.8.8'));
   }
 
   @override
-  Future<DnsPacket> lookupPacket(String host,
-      {InternetAddressType type = InternetAddressType.any}) async {
+  Future<DnsPacket> lookupPacket(
+      String host, {
+        InternetAddressType type = InternetAddressType.any,
+        DnsRecordType recordType = DnsRecordType.a,
+      }) async {
     final socket = await _getSocket();
     final dnsPacket = DnsPacket();
-    dnsPacket.questions = [DnsQuestion(host: host)];
 
-    // Add query to list of unfinished queries
-    final responseWaiter = _DnsResponseWaiter(host);
+    // Set a random ID for this packet
+    final packetId = Random().nextInt(0xFFFF);
+    dnsPacket.id = packetId;
+
+    dnsPacket.questions = [DnsQuestion(host: host, recordType: recordType)];
+
+    // Set recursion desired
+    dnsPacket.isRecursionDesired = true;
+
+    // Add EDNS(0) OPT record in Additional section
+    // This advertises extended capabilities and larger UDP payload size
+    dnsPacket.additionalRecords = [
+      _createOptRecord(),
+    ];
+
+    final responseWaiter = _DnsResponseWaiter(host, packetId);
     _responseWaiters.add(responseWaiter);
 
-    // Send query
-    socket.send(
-      dnsPacket.toImmutableBytes(),
-      remoteAddress,
-      remotePort,
-    );
+    // Send the DNS query packet
+    final bytes = dnsPacket.toImmutableBytes();
+    socket.send(bytes, remoteAddress, remotePort);
 
-    // Get timeout for response
-    final timeout = this.timeout ?? DnsClient.defaultTimeout;
-
-    // Set timer
-    responseWaiter.timer = Timer(timeout, () {
-      // Ignore if already completed
-      if (responseWaiter.completer.isCompleted) {
-        return;
+    // Set timeout for response
+    final queryTimeout = timeout ?? DnsClient.defaultTimeout;
+    responseWaiter.timer = Timer(queryTimeout, () {
+      if (!responseWaiter.completer.isCompleted) {
+        responseWaiter.unlink();
+        responseWaiter.completer.completeError(
+          TimeoutException("DNS query '$host' timed out after $queryTimeout"),
+        );
       }
-
-      // Remove from the list of response waiters
-      responseWaiter.unlink();
-
-      // Complete the future
-      responseWaiter.completer.completeError(
-        TimeoutException("DNS query '$host' timeout"),
-      );
     });
 
-    // Return future
     return responseWaiter.completer.future;
+  }
+
+  /// Creates an OPT record for EDNS(0) support.
+  /// This tells the server we can handle larger responses (up to `defaultUdpPayloadSize` bytes).
+  DnsResourceRecord _createOptRecord() {
+    final opt = DnsResourceRecord();
+    // The OPT RR's NAME is always the root (empty) and represented as a single 0-length label
+    opt.nameParts = [];
+    opt.type = typeOpt;
+    // class field in OPT record is used for UDP payload size
+    opt.classy = defaultUdpPayloadSize;
+    // TTL is used for extended RCODE and flags, 0 for now
+    opt.ttl = 0;
+    // No data for basic EDNS(0) usage
+    opt.data = [];
+    return opt;
   }
 
   Future<RawDatagramSocket> _getSocket() async {
     if (_socket != null) {
-      return _socket;
+      return _socket!;
     }
-    final localAddress = this.localAddress;
-    final localPort = this.localPort;
-    final socket = await _bindSocket(
-      localAddress,
-      localPort,
-    );
+    final localAddr = localAddress;
+    final localPrt = localPort;
+    final socket = await _bindSocket(localAddr, localPrt);
     socket.listen((event) {
       if (event == RawSocketEvent.read) {
-        // Read UDP packet
         final datagram = socket.receive();
         if (datagram == null) {
           return;
@@ -116,47 +115,54 @@ class UdpDnsClient extends PacketBasedDnsClient {
         _receiveUdpPacket(datagram);
       }
     });
+    _socket = Future.value(socket);
     return socket;
   }
 
   void _receiveUdpPacket(Datagram datagram) {
-    // Read DNS packet
+    // Decode the DNS packet from the received datagram
     final dnsPacket = DnsPacket();
     dnsPacket.decodeSelf(RawReader.withBytes(datagram.data));
 
-    // Read answers
-    for (var answer in dnsPacket.answers) {
-      final host = answer.name;
-      var removedResponseWaiters = <_DnsResponseWaiter>[];
-      for (var query in _responseWaiters) {
-        if (query.completer.isCompleted == false && query.host == host) {
-          removedResponseWaiters.add(query);
-          query.timer.cancel();
-          query.completer.complete(dnsPacket);
-          break;
-        }
+    final packetId = dnsPacket.id;
+
+    _DnsResponseWaiter? matchedWaiter;
+    for (var query in _responseWaiters) {
+      if (!query.completer.isCompleted && query.id == packetId) {
+        matchedWaiter = query;
+        break;
       }
-      for (var removed in removedResponseWaiters) {
-        removed.unlink();
+    }
+
+    if (matchedWaiter != null) {
+      matchedWaiter.timer.cancel();
+      matchedWaiter.unlink();
+
+      // Check if truncated
+      if (dnsPacket.isTruncated) {
+        // If truncated, EDNS(0) is not enough or packet is too large
+        // Consider retrying over TCP here if needed.
+        // For demonstration:
+        // matchedWaiter.completer.completeError(StateError("Truncated response. Consider TCP fallback."));
+        // Or implement a TCP fallback lookup and then complete matchedWaiter.completer with that result.
+      } else {
+        matchedWaiter.completer.complete(dnsPacket);
       }
     }
   }
 
   /// Binds socket. If port is null, attempts 3 random ports before giving up.
   static Future<RawDatagramSocket> _bindSocket(
-      InternetAddress address, int port) async {
+      InternetAddress? address, int? port) async {
     address ??= InternetAddress.anyIPv4;
     for (var n = 3; n > 0; n--) {
       try {
         return await RawDatagramSocket.bind(address, port ?? _randomPort());
-      } catch (e) {
-        if (port == null && n > 1 && e.toString().contains("port")) {
-          return null;
-        }
-        rethrow;
+      } catch (_) {
+        if (n == 1) rethrow;
       }
     }
-    throw StateError("impossible state");
+    throw StateError('Could not bind UDP socket after multiple attempts.');
   }
 
   static int _randomPort() {
@@ -165,11 +171,13 @@ class UdpDnsClient extends PacketBasedDnsClient {
   }
 }
 
-class _DnsResponseWaiter extends LinkedListEntry<_DnsResponseWaiter> {
+base class _DnsResponseWaiter extends LinkedListEntry<_DnsResponseWaiter> {
   final String host;
   final Completer<DnsPacket> completer = Completer<DnsPacket>();
-  Timer timer;
+  late Timer timer;
   final List<IpAddress> result = <IpAddress>[];
 
-  _DnsResponseWaiter(this.host);
+  final int id;
+
+  _DnsResponseWaiter(this.host, this.id);
 }

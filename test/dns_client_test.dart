@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:dns/dns.dart';
+import 'package:dart_dns/dart_dns.dart';
 import 'package:test/test.dart';
 import 'package:universal_io/io.dart';
 

@@ -1,10 +1,14 @@
-import 'package:dns/dns.dart';
+import 'dart:io';
+
+import 'package:dart_dns/dart_dns.dart';
 import 'dart:async';
 
 Future<void> main(List<String> args) async {
-  for (var arg in args) {
-    final client = HttpDnsClient.google();
-    final result = await client.lookup("google.com");
-    print("$arg --> ${result.join(' | ')}");
-  }
+  final client = UdpDnsClient(
+    remoteAddress: InternetAddress('203.109.191.1'));
+  final result =
+      await client.lookupPacket('google.com', recordType: DnsRecordType.a);
+  print('${result.answers.map(
+        (t) => t.dataAsHumanReadableString(),
+      ).join('\n ')}');
 }

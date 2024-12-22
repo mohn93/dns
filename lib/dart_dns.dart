@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-library dns;
+library dart_dns;
 
 export 'src/dns_client.dart';
 export 'src/dns_packet.dart';

@@ -14,18 +14,18 @@
 
 import 'dart:async';
 
-import 'package:dns/dns.dart';
+import 'package:dart_dns/dart_dns.dart';
 import 'package:test/test.dart';
 import 'package:universal_io/io.dart';
 
 import '../bin/dns-proxy.dart' as proxy;
 
 void main() {
-  test("DNS proxy executable", () async {
+  test('DNS proxy executable', () async {
     // Start server
     const port = 4242;
     proxy.main(
-        ["serve", "--silent", "--host=127.0.0.1", "--port=${port.toString()}"]);
+        ['serve', '--silent', '--host=127.0.0.1', '--port=${port.toString()}']);
 
     // Wait 100ms
     await Future.delayed(const Duration(milliseconds: 100));
@@ -35,7 +35,7 @@ void main() {
       remoteAddress: InternetAddress.loopbackIPv4,
       remotePort: port,
     );
-    final result = await client.lookup("google.com");
+    final result = await client.lookup('google.com');
 
     // Expect at least 1 IP address
     expect(result, hasLength(greaterThan(0)));

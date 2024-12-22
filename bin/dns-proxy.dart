@@ -13,12 +13,12 @@
 // limitations under the License.
 
 import 'package:args/command_runner.dart';
-import 'package:dns/dns.dart';
-import 'package:dns/src/dns_settings.dart';
+import 'package:dart_dns/dart_dns.dart';
+import 'package:dart_dns/src/dns_settings.dart';
 import 'package:universal_io/io.dart';
 import 'dart:convert';
 import 'dart:async';
-import 'package:ip/ip.dart';
+import 'package:better_dart_ip/ip.dart';
 
 List<String> _mainArgs = [];
 
@@ -28,49 +28,49 @@ List<String> _mainArgs = [];
 /// ```
 void main(List<String> args) async {
   _mainArgs = args;
-  final runner = CommandRunner("dns_proxy", "DNS proxy");
+  final runner = CommandRunner('dns_proxy', 'DNS proxy');
   runner.addCommand(ServeCommand());
   await runner.run(args);
 }
 
 class ServeCommand extends Command {
   @override
-  String get name => "serve";
+  String get name => 'serve';
 
   @override
-  String get description => "Starts DNS proxy";
+  String get description => 'Starts DNS proxy';
 
   ServeCommand() {
     argParser.addOption(
-      "https",
-      help: "DNS-over-HTTPS service URL",
+      'https',
+      help: 'DNS-over-HTTPS service URL',
     );
     argParser.addOption(
-      "host",
-      defaultsTo: "127.0.0.1",
-      help: "Local IP interface",
+      'host',
+      defaultsTo: '127.0.0.1',
+      help: 'Local IP interface',
     );
     argParser.addOption(
-      "port",
-      defaultsTo: "53",
-      help: "Local UDP port",
+      'port',
+      defaultsTo: '53',
+      help: 'Local UDP port',
     );
     argParser.addFlag(
-      "silent",
+      'silent',
       defaultsTo: false,
-      help: "Disable debug messages",
+      help: 'Disable debug messages',
     );
     if (Platform.isMacOS) {
-      argParser.addFlag("configure", defaultsTo: false);
+      argParser.addFlag('configure', defaultsTo: false);
     }
   }
 
   @override
   void run() async {
-    final host = InternetAddress(argResults["host"]);
-    final port = int.parse(argResults["port"]);
-    final dnsOverHttpsUrl = argResults["https"];
-    final isSilent = argResults["silent"];
+    final host = InternetAddress(argResults!['host']);
+    final port = int.parse(argResults!['port']);
+    final dnsOverHttpsUrl = argResults!['https'];
+    final isSilent = argResults!['silent'];
 
     // Define client
     var client = HttpDnsClient.google(maximalPrivacy: true);
@@ -84,20 +84,20 @@ class ServeCommand extends Command {
       if (!isSilent) {
         for (var question in packet.questions) {
           final typeName = DnsQuestion.stringFromType(question.type);
-          print("Lookup: ${question.name} ($typeName)");
+          print('Lookup: ${question.name} ($typeName)');
         }
       }
     }, afterOperation: (packet) {
       if (!isSilent) {
         var first = true;
         for (var answer in packet.answers) {
-          final typeName = DnsResourceRecord.stringFromType(answer.type);
+          final typeName = DnsResourceRecord.stringFromType(DnsRecordType.fromInt(answer.type));
           final ip = IpAddress.fromBytes(answer.data);
           if (first) {
             first = false;
-            print("Answer: ${answer.name} ($typeName)");
+            print('Answer: ${answer.name} ($typeName)');
           }
-          print("  --> $ip");
+          print('  --> $ip');
         }
       }
     });
@@ -106,7 +106,7 @@ class ServeCommand extends Command {
 
     // In OS X, we support changing system DNS server (temporarily)
     if (Platform.isMacOS) {
-      final isConfigureFlag = argResults["configure"] as bool;
+      final isConfigureFlag = argResults!['configure'] as bool;
       if (isConfigureFlag) {
         // Port must the default port
         if (!isSilent && port != DnsServer.defaultPort) {
@@ -114,17 +114,16 @@ class ServeCommand extends Command {
         }
 
         // We need root permissions
-        if (_whoami() != "root") {
-          final future = _startSudoProcess(host, port);
+        if (_whoami() != 'root') {
+           _startSudoProcess(host, port);
 
           // Check every 100ms whether the server is already running
           Timer.periodic(const Duration(milliseconds: 100), (timer) {
-            if (_processOut.toString().contains("\nResolving with:")) {
+            if (_processOut.toString().contains('\nResolving with:')) {
               timer.cancel();
               _configureMacOS(host);
             }
           });
-          await future;
           return;
         }
       }
@@ -132,21 +131,21 @@ class ServeCommand extends Command {
 
     // Start server
     if (!isSilent) {
-      print("");
-      print("Starting local DNS proxy at: 127.0.0.1:$port");
-      print("Resolving with: ${client.url}");
-      print("");
+      print('');
+      print('Starting local DNS proxy at: 127.0.0.1:$port');
+      print('Resolving with: ${client.url}');
+      print('');
     }
     await DnsServer.bind(filteringClient, address: host, port: port);
   }
 
   void _startSudoProcess(InternetAddress address, int port) async {
-    final executable = "sudo";
+    final executable = 'sudo';
     final executableArgs = [Platform.executable]
       ..addAll(Platform.executableArguments)
       ..add(Platform.script.path)
       ..addAll(_mainArgs);
-    final i = executableArgs.lastIndexOf("--configure");
+    final i = executableArgs.lastIndexOf('--configure');
     if (i < 0) {
       final commandString = "$executable ${executableArgs.join(' ')}";
       throw StateError("Failed to remove '--configure' from: $commandString");
@@ -181,28 +180,28 @@ Command 'sudo' usually asks your password.
   static void _configureMacOS(InternetAddress address) async {
     final client = MacNetworkSettings();
     final oldServers = await client.getDnsServers();
-    final oldServerString = oldServers.map((item) => item.address).join(', ');
-    print("");
-    print("Old DNS servers: [$oldServerString]");
+    final oldServerString = oldServers.map((item) => item!.address).join(', ');
+    print('');
+    print('Old DNS servers: [$oldServerString]');
     var isRestored = false;
     final onSignal = (ProcessSignal signal) async {
       if (!isRestored) {
         isRestored = true;
-        print("");
-        print("Restoring old DNS servers: [$oldServerString]");
-        print("");
-        await client.setDnsServers(oldServers);
+        print('');
+        print('Restoring old DNS servers: [$oldServerString]');
+        print('');
+        await client.setDnsServers(oldServers.map((item) => item!).toList());
       }
       exit(0);
     };
     ProcessSignal.sigint.watch().listen(onSignal);
-    print("New DNS servers: [${address.address}]");
-    print("");
+    print('New DNS servers: [${address.address}]');
+    print('');
     await client.setDnsServers([address]);
   }
 }
 
 String _whoami() {
-  final result = Process.runSync("whoami", []);
+  final result = Process.runSync('whoami', []);
   return (result.stdout as String).trim();
 }

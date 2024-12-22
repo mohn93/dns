@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:dns/dns.dart';
-import 'package:ip/foundation.dart';
-import 'package:raw/raw.dart';
-import 'package:raw/test_helpers.dart';
+import 'package:dart_dns/dart_dns.dart';
+import 'package:better_dart_ip/foundation.dart';
+import 'package:dart_raw/raw.dart';
+import 'package:dart_raw/test_helpers.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group("DnsPacket", () {
-    group("default", () {
+  group('DnsPacket', () {
+    group('default', () {
       final example = DnsPacket();
 
-      test("encode, decode", () {
+      test('encode, decode', () {
         final reader = RawReader.withBytes(example.toImmutableBytes());
         final decoded = DnsPacket();
         decoded.decodeSelf(reader);
@@ -32,25 +32,25 @@ void main() {
       });
     });
 
-    group("example #1", () {
-      List<int> exampleBytes;
-      DnsPacket example;
+    group('example #1', () {
+      late List<int> exampleBytes;
+      late DnsPacket example;
 
       setUp(() {
-        exampleBytes = const DebugHexDecoder().convert("""
+        exampleBytes = const DebugHexDecoder().convert('''
 0x0000: db42 8180  0001 0001  0000 0000  0377 7777
 0x0010: 0765 7861  6d70 6c65  0363 6f6d  0000 0100
 0x0020: 01c0 0c00  0100 0100  0002 5800  049b 2111
 0x0030: 44
-""");
+''');
 
         final question = DnsQuestion();
-        question.nameParts.addAll(["www", "example", "com"]);
-        question.type = 1;
+        question.nameParts.addAll(['www', 'example', 'com']);
+        question.type = DnsRecordType.a;
         question.classy = 1;
 
         final answer = DnsResourceRecord();
-        answer.nameParts = const ["www", "example", "com"];
+        answer.nameParts = const ['www', 'example', 'com'];
         answer.type = 1;
         answer.classy = 1;
         answer.ttl = 600;
@@ -68,7 +68,7 @@ void main() {
         example.answers = [answer];
       });
 
-      test("decoded properties", () {
+      test('decoded properties', () {
         final decoded = DnsPacket();
         decoded.decodeSelf(RawReader.withBytes(exampleBytes));
 
@@ -121,7 +121,7 @@ void main() {
         expect(decoded.additionalRecords, hasLength(0));
       });
 
-      test("encode, decode, encode", () {
+      test('encode, decode, encode', () {
         // encode
         final writer = RawWriter.withCapacity(500);
         example.encodeSelf(writer);
@@ -140,7 +140,7 @@ void main() {
         expect(encodedReader.availableLengthInBytes, 0);
       });
 
-      test("decode", () {
+      test('decode', () {
         final reader = RawReader.withBytes(exampleBytes);
         final decoded = DnsPacket();
         decoded.decodeSelf(reader);
